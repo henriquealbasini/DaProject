@@ -104,37 +104,34 @@ std::vector<Assignment> getAssignments(Graph<std::string>& g) {
 
 void writeAssignmentOutput(const std::vector<Assignment>& assignments, std::ostream& out, double maxFlow) {
     int required = (int)submissionList.size() * currentConfig.minReviewsPerSubmission;
-    bool success = ((int)maxFlow >= required);
- 
-    if (success) {
-        // Submission -> Reviewer view
-        out << "#SubmissionId,ReviewerId,Match\n";
-        for (const auto& a : assignments) {
-            out << a.submissionId << ", " << a.reviewerId << ", " << a.matchDomain << "\n";
-        }
- 
-        // Reviewer -> Submission view (sorted by reviewerId)
-        out << "#ReviewerId,SubmissionId,Match\n";
-        std::vector<Assignment> byReviewer = assignments;
-        std::sort(byReviewer.begin(), byReviewer.end(),
-            [](const Assignment& a, const Assignment& b) {
-                return a.reviewerId < b.reviewerId;
-            });
-        for (const auto& a : byReviewer) {
-            out << a.reviewerId << ", " << a.submissionId << ", " << a.matchDomain << "\n";
-        }
- 
-        out << "#Total: " << (int)assignments.size() << "\n";
- 
-    } else {
-        // Count how many reviews each submission actually got
-        std::map<int, int> reviewCount;
-        for (const auto& sub : submissionList) reviewCount[sub.id] = 0;
-        for (const auto& a : assignments)       reviewCount[a.submissionId]++;
- 
+    
+    // 1. ALWAYS print the assignments found (even if it's not enough)
+    out << "#SubmissionId,ReviewerId,Match\n";
+    for (const auto& a : assignments) {
+        out << a.submissionId << ", " << a.reviewerId << ", " << a.matchDomain << "\n";
+    }
+
+    out << "#ReviewerId,SubmissionId,Match\n";
+    std::vector<Assignment> byRev = assignments;
+    std::sort(byRev.begin(), byRev.end(), [](const Assignment& a, const Assignment& b) {
+        if (a.reviewerId != b.reviewerId) return a.reviewerId < b.reviewerId;
+        return a.submissionId < b.submissionId;
+    });
+    for (const auto& a : byRev) {
+        out << a.reviewerId << ", " << a.submissionId << ", " << a.matchDomain << "\n";
+    }
+
+    out << "#Total: " << (int)assignments.size() << "\n";
+
+    // 2. IF flow is insufficient, APPEND the Missing Reviews report
+    if ((int)maxFlow < required) {
+        std::map<int, int> counts;
+        for (const auto& sub : submissionList) counts[sub.id] = 0;
+        for (const auto& a : assignments) counts[a.submissionId]++;
+
         out << "#SubmissionId,Domain,MissingReviews\n";
         for (const auto& sub : submissionList) {
-            int missing = currentConfig.minReviewsPerSubmission - reviewCount[sub.id];
+            int missing = currentConfig.minReviewsPerSubmission - counts[sub.id];
             if (missing > 0) {
                 out << sub.id << ", " << sub.primaryDomain << ", " << missing << "\n";
             }
