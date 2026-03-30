@@ -310,9 +310,40 @@ void Vertex<T>::deleteEdge(Edge<T> *edge) {
             it++;
         }
     }
-    if (edge->getReverse() == nullptr || edge->getWeight() > 0) {
-        delete edge;
+
+    // If there is a reverse edge, delete it too
+    if (edge->getReverse() != nullptr) {
+        Edge<T> *rev = edge->getReverse();
+        rev->setReverse(nullptr);
+
+        // Remove rev from its orig's adj
+        Vertex<T> *revOrig = rev->getOrig();
+        auto it3 = revOrig->adj.begin();
+        while (it3 != revOrig->adj.end()) {
+            if (*it3 == rev) {
+                revOrig->adj.erase(it3);
+                break;
+            } else {
+                ++it3;
+            }
+        }
+
+        // Remove rev from its dest's incoming
+        Vertex<T> *revDest = rev->getDest();
+        auto it4 = revDest->incoming.begin();
+        while (it4 != revDest->incoming.end()) {
+            if (*it4 == rev) {
+                revDest->incoming.erase(it4);
+                break;
+            } else {
+                ++it4;
+            }
+        }
+
+        delete rev;
     }
+
+    delete edge;
 }
 
 /********************** Edge  ****************************/
