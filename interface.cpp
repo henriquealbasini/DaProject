@@ -2,19 +2,19 @@
 #include <string>
 #include <vector>
 #include <limits>
+#include <sstream>
+#include <fstream>
+#include "DataStructures.h"
 
-// (If you put your structs in a separate file, include it here)
-// #include "DataStructures.h"
-
-// --- Function Declarations (The "Promises" we talked about!) ---
 void runInteractiveMenu();
 void runBatchMode(const std::string& inputFile, const std::string& outputFile);
 bool parseInputData(const std::string& filename); // We will build this later
 
 // --- Global Data (From Step 1) ---
-// std::vector<Submission> submissionList;
-// std::vector<Reviewer> reviewerList;
-// AppConfig currentConfig;
+std::vector<Submission> submissionList;
+std::vector<Reviewer> reviewerList;
+
+AppConfig currentConfig;
 
 int main(int argc, char* argv[]) {
     // 1. Check for Batch Mode
@@ -146,7 +146,119 @@ void runInteractiveMenu() {
     }
 }
 
-bool parseInputData(const std::string& filename) {
-    // TODO: We will build the file reading logic here in Steps 4 & 5
-    return false; 
+// Helper function to remove leading and trailing whitespace
+std::string trim(const std::string& str) {
+    size_t first = str.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return ""; // String is all whitespace
+    size_t last = str.find_last_not_of(" \t\r\n");
+    return str.substr(first, (last - first + 1));
 }
+
+bool parseInputData(const std::string& filename) {
+    
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Error: Could not open file " << filename << "\n";
+        return false;
+    }
+
+    // Clear existing data in case the user loads a file twice from the menu
+    submissionList.clear();
+    reviewerList.clear();
+
+    std::string line;
+    // Our state machine to track which section we are reading
+    enum ParseState { NONE, SUBMISSIONS, REVIEWERS, PARAMETERS, CONTROL };
+    ParseState currentState = NONE;
+
+    while (std::getline(file, line)) {
+        line = trim(line);
+        if (line.empty()) continue;
+
+        // 1. Check for exact section headers
+        if (line == "#Submissions") { currentState = SUBMISSIONS; continue; }
+        if (line == "#Reviewers")   { currentState = REVIEWERS; continue; }
+        if (line == "#Parameters")  { currentState = PARAMETERS; continue; }
+        if (line == "#Control")     { currentState = CONTROL; continue; }
+
+        // 2. Handle Comments
+        // The '#' character ignores everything after it, unless it's a section header (handled above)
+        size_t hashPos = line.find('#');
+        if (hashPos != std::string::npos) {
+            line = line.substr(0, hashPos); // Cut off the comment part
+            line = trim(line);
+            if (line.empty()) continue; // If the whole line was a comment, skip it
+        }
+
+        // 3. Tokenize the line by commas
+        std::stringstream ss(line);
+        std::string token;
+        std::vector<std::string> tokens;
+        
+        while (std::getline(ss, token, ',')) {
+            tokens.push_back(trim(token));
+        }
+
+        // 4. Extract data based on the current state
+        try {
+            if (currentState == SUBMISSIONS && tokens.size() >= 5) {
+                Submission sub;
+                sub.id = std::stoi(tokens[0]);
+                sub.title = tokens[1];
+                sub.authors = tokens[2];
+                sub.email = tokens[3];
+                sub.primaryDomain = std::stoi(tokens[4]);
+                
+                // Secondary domain is optional
+                if (tokens.size() >= 6 && !tokens[5].empty()) {
+                    sub.secondaryDomain = std::stoi(tokens[5]);
+                }
+                submissionList.push_back(sub);
+            } 
+            else if (currentState == REVIEWERS && tokens.size() >= 4) {
+                Reviewer rev;
+                rev.id = std::stoi(tokens[0]);
+                rev.name = tokens[1];
+                rev.email = tokens[2];
+                rev.primaryExpertise = std::stoi(tokens[3]);
+                
+                // Secondary expertise is optional
+                if (tokens.size() >= 5 && !tokens[4].empty()) {
+                    rev.secondaryExpertise = std::stoi(tokens[4]);
+                }
+                reviewerList.push_back(rev);
+            }
+            else if ((currentState == PARAMETERS || currentState == CONTROL) && tokens.size() >= 2) {
+                std::string key = tokens[0];
+                
+                if (key == "OutputFileName") {
+                    // Remove quotes if present, e.g., "assign.csv"
+                    std::string val = tokens[1];
+                    if (val.front() == '"' && val.back() == '"') {
+                        val = val.substr(1, val.length() - 2);
+                    }
+                    currentConfig.outputFileName = val;
+                } else {
+                    int val = std::stoi(tokens[1]);
+                    if (key == "MinReviewsPerSubmission") currentConfig.minReviewsPerSubmission = val;
+                    else if (key == "MaxReviewsPerReviewer") currentConfig.maxReviewsPerReviewer = val;
+                    else if (key == "PrimaryReviewerExpertise") currentConfig.primaryReviewerExpertise = val;
+                    else if (key == "SecondaryReviewerExpertise") currentConfig.secondaryReviewerExpertise = val;
+                    else if (key == "PrimarySubmissionDomain") currentConfig.primarySubmissionDomain = val;
+                    else if (key == "SecondarySubmissionDomain") currentConfig.secondarySubmissionDomain = val;
+                    else if (key == "GenerateAssignments") currentConfig.generateAssignments = val;
+                    else if (key == "RiskAnalysis") currentConfig.riskAnalysis = val;
+                }
+            }
+        } catch (const std::exception& e) {
+            // Files with inconsistent values should be rejected 
+            std::cerr << "Summary Error: Inconsistent data format encountered in line: " << line << "\n";
+            return false; 
+        }
+    }
+
+    std::cout << "Successfully loaded " << submissionList.size() << " submissions and " 
+              << reviewerList.size() << " reviewers.\n";
+    return true;
+}
+
