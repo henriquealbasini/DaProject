@@ -34,36 +34,42 @@ double buildAndSolve(Graph<std::string>& g, int skipReviewerId = -1) {
     g.addVertex("SOURCE");
     g.addVertex("SINK");
  
-    // Add reviewer nodes + SOURCE -> Reviewer edges
+    // 1. SOURCE -> Submissions
+    for (const auto& sub : submissionList) {
+        std::string sNode = "S_" + std::to_string(sub.id);
+        g.addVertex(sNode);
+        // The capacity is the exact number of reviews this paper DEMANDS
+        g.addBidirectionalEdge("SOURCE", sNode, currentConfig.minReviewsPerSubmission); 
+    }
+ 
+    // 2. Reviewers -> SINK
     for (const auto& rev : reviewerList) {
         if (rev.id == skipReviewerId) continue;
         std::string rNode = "R_" + std::to_string(rev.id);
         g.addVertex(rNode);
-        g.addBidirectionalEdge("SOURCE", rNode, currentConfig.maxReviewsPerReviewer);
+        // The capacity is the MAX SUPPLY this reviewer can provide
+        g.addBidirectionalEdge(rNode, "SINK", currentConfig.maxReviewsPerReviewer);
     }
  
-    // Add submission nodes + Submission -> SINK edges
+    // 3. Submissions -> Reviewers (The Match)
     for (const auto& sub : submissionList) {
         std::string sNode = "S_" + std::to_string(sub.id);
-        g.addVertex(sNode);
-        g.addBidirectionalEdge(sNode, "SINK", currentConfig.minReviewsPerSubmission);
-    }
  
-    // Add Reviewer -> Submission edges where primary domains match
-    for (const auto& rev : reviewerList) {
-        if (rev.id == skipReviewerId) continue;
-        std::string rNode = "R_" + std::to_string(rev.id);
- 
-        for (const auto& sub : submissionList) {
-            std::string sNode = "S_" + std::to_string(sub.id);
+        for (const auto& rev : reviewerList) {
+            if (rev.id == skipReviewerId) continue;
+            std::string rNode = "R_" + std::to_string(rev.id);
  
             if (rev.primaryExpertise == sub.primaryDomain) {
-                g.addBidirectionalEdge(rNode, sNode, 1);
+                // A reviewer can only review a specific paper ONCE
+                g.addBidirectionalEdge(sNode, rNode, 1);
             }
         }
     }
  
-    return g.edmondsKarp("SOURCE", "SINK");
+    // 4. Run the algorithm
+    // If the return value == (Total Submissions * minReviewsPerSubmission), 
+    // then the assignment was 100% successful!
+    return g.edmondsKarp("SOURCE", "SINK"); 
 }
 
 
@@ -76,19 +82,11 @@ std::vector<Assignment> getAssignments(Graph<std::string>& g) {
         std::string orig = e->getOrig()->getInfo();
         std::string dest = e->getDest()->getInfo();
  
-        // Only care about Reviewer -> Submission edges
-        if (orig.size() > 2 && orig.substr(0, 2) == "R_" &&
-            dest.size() > 2 && dest.substr(0, 2) == "S_") {
+        if (orig.size() > 2 && orig.substr(0, 2) == "S_" &&
+            dest.size() > 2 && dest.substr(0, 2) == "R_") {
  
-            int revId = std::stoi(orig.substr(2));
-            int subId = std::stoi(dest.substr(2));
- 
-            int matchDomain = -1;
-            for (const auto& rev : reviewerList) {
-                if (rev.id == revId) { matchDomain = rev.primaryExpertise; break; }
-            }
- 
-            assignments.push_back({subId, revId, matchDomain});
+            int subId = std::stoi(orig.substr(2)); // orig is now S_
+            int revId = std::stoi(dest.substr(2)); // dest is now R_
         }
     }
  
