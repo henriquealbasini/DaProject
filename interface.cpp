@@ -4,17 +4,249 @@
 #include <limits>
 #include <sstream>
 #include <fstream>
+#include <map>
+#include <algorithm>
 #include "DataStructures.h"
+#include "Graph.h"
+
 
 void runInteractiveMenu();
 void runBatchMode(const std::string& inputFile, const std::string& outputFile);
 bool parseInputData(const std::string& filename); // We will build this later
+void generateAssignments(std::ofstream* outFile = nullptr);
+void runRiskAnalysis(std::ofstream* outFile = nullptr);
 
 // --- Global Data (From Step 1) ---
 std::vector<Submission> submissionList;
 std::vector<Reviewer> reviewerList;
-
 AppConfig currentConfig;
+
+struct Assignment {
+    int submissionId;
+    int reviewerId;
+    int matchDomain;
+};
+
+
+// --- Graph Building and Max-Flow Function ---
+
+double buildAndSolve(Graph<std::string>& g, int skipReviewerId = -1) {
+    g.addVertex("SOURCE");
+    g.addVertex("SINK");
+ 
+    // Add reviewer nodes + SOURCE -> Reviewer edges
+    for (const auto& rev : reviewerList) {
+        if (rev.id == skipReviewerId) continue;
+        std::string rNode = "R_" + std::to_string(rev.id);
+        g.addVertex(rNode);
+        g.addBidirectionalEdge("SOURCE", rNode, currentConfig.maxReviewsPerReviewer);
+    }
+ 
+    // Add submission nodes + Submission -> SINK edges
+    for (const auto& sub : submissionList) {
+        std::string sNode = "S_" + std::to_string(sub.id);
+        g.addVertex(sNode);
+        g.addBidirectionalEdge(sNode, "SINK", currentConfig.minReviewsPerSubmission);
+    }
+ 
+    // Add Reviewer -> Submission edges where primary domains match
+    for (const auto& rev : reviewerList) {
+        if (rev.id == skipReviewerId) continue;
+        std::string rNode = "R_" + std::to_string(rev.id);
+ 
+        for (const auto& sub : submissionList) {
+            std::string sNode = "S_" + std::to_string(sub.id);
+ 
+            if (rev.primaryExpertise == sub.primaryDomain) {
+                g.addBidirectionalEdge(rNode, sNode, 1);
+            }
+        }
+    }
+ 
+    return g.edmondsKarp("SOURCE", "SINK");
+}
+
+
+// This function will extract the assignments from the graph after running Max-Flow
+
+std::vector<Assignment> getAssignments(Graph<std::string>& g) {
+    std::vector<Assignment> assignments;
+ 
+    for (auto e : g.getUsedEdges()) {
+        std::string orig = e->getOrig()->getInfo();
+        std::string dest = e->getDest()->getInfo();
+ 
+        // Only care about Reviewer -> Submission edges
+        if (orig.size() > 2 && orig.substr(0, 2) == "R_" &&
+            dest.size() > 2 && dest.substr(0, 2) == "S_") {
+ 
+            int revId = std::stoi(orig.substr(2));
+            int subId = std::stoi(dest.substr(2));
+ 
+            int matchDomain = -1;
+            for (const auto& rev : reviewerList) {
+                if (rev.id == revId) { matchDomain = rev.primaryExpertise; break; }
+            }
+ 
+            assignments.push_back({subId, revId, matchDomain});
+        }
+    }
+ 
+    std::sort(assignments.begin(), assignments.end(),
+        [](const Assignment& a, const Assignment& b) {
+            return a.submissionId < b.submissionId;
+        });
+ 
+    return assignments;
+}
+
+// This function will write the output to a file or standard output based on the success of the assignment
+
+void writeAssignmentOutput(const std::vector<Assignment>& assignments, std::ostream& out, double maxFlow) {
+    int required = (int)submissionList.size() * currentConfig.minReviewsPerSubmission;
+    bool success = ((int)maxFlow >= required);
+ 
+    if (success) {
+        // Submission -> Reviewer view
+        out << "#SubmissionId,ReviewerId,Match\n";
+        for (const auto& a : assignments) {
+            out << a.submissionId << ", " << a.reviewerId << ", " << a.matchDomain << "\n";
+        }
+ 
+        // Reviewer -> Submission view (sorted by reviewerId)
+        out << "#ReviewerId,SubmissionId,Match\n";
+        std::vector<Assignment> byReviewer = assignments;
+        std::sort(byReviewer.begin(), byReviewer.end(),
+            [](const Assignment& a, const Assignment& b) {
+                return a.reviewerId < b.reviewerId;
+            });
+        for (const auto& a : byReviewer) {
+            out << a.reviewerId << ", " << a.submissionId << ", " << a.matchDomain << "\n";
+        }
+ 
+        out << "#Total: " << (int)assignments.size() << "\n";
+ 
+    } else {
+        // Count how many reviews each submission actually got
+        std::map<int, int> reviewCount;
+        for (const auto& sub : submissionList) reviewCount[sub.id] = 0;
+        for (const auto& a : assignments)       reviewCount[a.submissionId]++;
+ 
+        out << "#SubmissionId,Domain,MissingReviews\n";
+        for (const auto& sub : submissionList) {
+            int missing = currentConfig.minReviewsPerSubmission - reviewCount[sub.id];
+            if (missing > 0) {
+                out << sub.id << ", " << sub.primaryDomain << ", " << missing << "\n";
+            }
+        }
+    }
+}
+
+
+// --- Main Logic for Generating Assignments and Running Risk Analysis ---
+
+void generateAssignments(std::ofstream* outFile) {
+    if (submissionList.empty() || reviewerList.empty()) {
+        std::cerr << "Error: No data loaded.\n";
+        return;
+    }
+ 
+    Graph<std::string> g;
+    double maxFlow = buildAndSolve(g);
+    int required = (int)submissionList.size() * currentConfig.minReviewsPerSubmission;
+ 
+    if ((int)maxFlow >= required) {
+        std::cout << "Assignment successful! Total reviews assigned: " << (int)maxFlow << "\n";
+    } else {
+        std::cout << "Warning: Could not meet minimum reviews for all submissions.\n";
+        std::cout << "Achieved " << (int)maxFlow << " of " << required << " required reviews.\n";
+    }
+ 
+    // Only write to file if GenerateAssignments != 0
+    if (currentConfig.generateAssignments != 0) {
+        auto assignments = getAssignments(g);
+ 
+        if (outFile && outFile->is_open()) {
+            // Batch mode: write to the provided file stream
+            writeAssignmentOutput(assignments, *outFile, maxFlow);
+        } else {
+            // Interactive mode: write to the configured output file
+            std::ofstream f(currentConfig.outputFileName);
+            if (!f.is_open()) {
+                std::cerr << "Error: Could not open output file " << currentConfig.outputFileName << "\n";
+                return;
+            }
+            writeAssignmentOutput(assignments, f, maxFlow);
+            f.close();
+            std::cout << "Output written to: " << currentConfig.outputFileName << "\n";
+        }
+    }
+}
+
+void runRiskAnalysis(std::ofstream* outFile) {
+    if (submissionList.empty() || reviewerList.empty()) {
+        std::cerr << "Error: No data loaded.\n";
+        return;
+    }
+ 
+    int required = (int)submissionList.size() * currentConfig.minReviewsPerSubmission;
+    std::vector<int> riskyReviewers;
+ 
+    std::cout << "Running risk analysis (testing " << reviewerList.size()
+              << " reviewers)...\n";
+ 
+    for (const auto& rev : reviewerList) {
+        Graph<std::string> g;
+        double flow = buildAndSolve(g, rev.id); // exclude this reviewer
+        if ((int)flow < required) {
+            riskyReviewers.push_back(rev.id);
+        }
+    }
+ 
+    std::sort(riskyReviewers.begin(), riskyReviewers.end());
+ 
+    // Build the output text
+    std::ostringstream result;
+    result << "#Risk Analysis: 1\n";
+    for (int i = 0; i < (int)riskyReviewers.size(); i++) {
+        if (i > 0) result << ", ";
+        result << riskyReviewers[i];
+    }
+    if (!riskyReviewers.empty()) result << "\n";
+ 
+    // Print to console
+    if (riskyReviewers.empty()) {
+        std::cout << "Result: No single reviewer is critical. Assignment holds even if any one drops out.\n";
+    } else {
+        std::cout << "Result: The following reviewers are CRITICAL (removing any one breaks the assignment):\n";
+        for (int id : riskyReviewers) {
+            for (const auto& rev : reviewerList) {
+                if (rev.id == id) {
+                    std::cout << "  Reviewer " << id << " (" << rev.name << ")\n";
+                    break;
+                }
+            }
+        }
+    }
+ 
+    // Write to file
+    if (outFile && outFile->is_open()) {
+        *outFile << result.str();
+    } else {
+        // Append to the output file (assignment may already be there)
+        std::ofstream f(currentConfig.outputFileName, std::ios::app);
+        if (f.is_open()) {
+            f << result.str();
+            f.close();
+            std::cout << "Risk analysis appended to: " << currentConfig.outputFileName << "\n";
+        } else {
+            std::cerr << "Error: Could not open output file for risk analysis.\n";
+        }
+    }
+}
+
+
+
 
 int main(int argc, char* argv[]) {
     // 1. Check for Batch Mode
@@ -40,15 +272,26 @@ int main(int argc, char* argv[]) {
 // --- Function Definitions (Skeletons for now) ---
 
 void runBatchMode(const std::string& inputFile, const std::string& outputFile) {
-    // Attempt to parse the file
     if (parseInputData(inputFile)) {
-        std::cout << "Data loaded successfully from " << inputFile << "." << std::endl;
+        std::cout << "Data loaded. Processing assignment..." << std::endl;
         
-        // TODO: Later, we will call your Graph/Max-Flow algorithms here
-        
-        std::cout << "Process complete. Output generated for: " << outputFile << std::endl;
+        std::ofstream outFile(outputFile);
+        if (!outFile.is_open()) {
+            std::cerr << "Batch Mode Error: Could not open " << outputFile << " for writing." << std::endl;
+            return;
+        }
+
+        // Trigger the assignment logic you wrote
+        generateAssignments(&outFile);
+
+        // Task 3.2: If the input file's #Control section enabled RiskAnalysis
+        if (currentConfig.riskAnalysis != 0) {
+            runRiskAnalysis(&outFile);
+        }
+
+        outFile.close();
+        std::cout << "Batch processing complete. Results saved to " << outputFile << std::endl;
     } else {
-        // The project requires error messages to be directed to standard error 
         std::cerr << "Batch Mode Error: Failed to parse the input file." << std::endl;
     }
 }
@@ -118,21 +361,22 @@ void runInteractiveMenu() {
                 }
                 break;
 
-            case 4:
+            case 4: // Generate Assignments
                 if (!dataLoaded) {
                     std::cout << "Warning: Please load data first (Option 1).\n";
                 } else {
                     std::cout << "\nRunning Max-Flow Assignment Algorithm...\n";
-                    // TODO: Call your graph building and Max-Flow functions here
+                    // This uses the output filename defined in the #Control section of the CSV
+                    generateAssignments(); 
                 }
                 break;
 
-            case 5:
+            case 5: // Run Risk Analysis
                 if (!dataLoaded) {
                     std::cout << "Warning: Please load data first (Option 1).\n";
                 } else {
-                    std::cout << "\nRunning Risk Analysis...\n";
-                    // TODO: Call your risk analysis functions here
+                    std::cout << "\nRunning Risk Analysis (N-1)...\n";
+                    runRiskAnalysis(); 
                 }
                 break;
 
