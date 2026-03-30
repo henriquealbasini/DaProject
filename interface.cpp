@@ -6,6 +6,7 @@
 #include <fstream>
 #include <map>
 #include <algorithm>
+#include <unistd.h>
 #include "DataStructures.h"
 #include "Graph.h"
 
@@ -14,6 +15,7 @@ void runBatchMode(const std::string& inputFile, const std::string& outputFile);
 bool parseInputData(const std::string& filename);
 void generateAssignments(std::ofstream* outFile = nullptr);
 void runRiskAnalysis(std::ofstream* outFile = nullptr);
+void runInteractiveMenu() ;
 
 // --- Global Data ---
 std::vector<Submission> submissionList;
@@ -211,7 +213,15 @@ std::string trim(const std::string& s) {
  */
 bool parseInputData(const std::string& filename) {
     std::ifstream file(filename);
-    if (!file.is_open()) return false;
+    if (!file.is_open()) {
+        std::cout << "DEBUG: Could not open file '" << filename << "' (cwd=";
+        char cwd[1024];
+        if (getcwd(cwd, sizeof(cwd)) != nullptr) {
+            std::cout << cwd;
+        }
+        std::cout << ")\n";
+        return false;
+    }
 
     submissionList.clear();
     reviewerList.clear();
@@ -273,12 +283,114 @@ void runBatchMode(const std::string& inputFile, const std::string& outputFile) {
     }
 }
 
-int main(int argc, char* argv[]) {
-    // Expected usage: ./tool -b input.csv output.csv
-    if (argc == 4 && std::string(argv[1]) == "-b") {
-        runBatchMode(argv[2], argv[3]);
-    } else {
-        std::cout << "Usage: ./tool -b <input_csv> <output_csv>\n";
+void runInteractiveMenu() {
+    int choice = -1;
+    std::string filename;
+    
+    // This flag prevents the user from crashing the program by running algorithms on empty data
+    bool dataLoaded = false; 
+
+    while (choice != 0) {
+        std::cout << "\n============================================\n";
+        std::cout << "  Scientific Conference Organization Tool   \n";
+        std::cout << "============================================\n";
+        std::cout << "1. Load Input Data (.csv)\n";
+        std::cout << "2. View Loaded Submissions\n";
+        std::cout << "3. View Loaded Reviewers\n";
+        std::cout << "4. Generate Assignments (Max-Flow)\n";
+        std::cout << "5. Run Risk Analysis\n";
+        std::cout << "0. Exit\n";
+        std::cout << "--------------------------------------------\n";
+        std::cout << "Enter your choice: ";
+
+        // --- SAFE INPUT HANDLING ---
+        // Prevents an infinite loop if the user accidentally types a letter instead of a number
+        if (!(std::cin >> choice)) {
+            std::cout << "Error: Invalid input. Please enter a number.\n";
+            std::cin.clear(); // Clear the error state
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Discard bad input
+            continue; 
+        }
+
+        // --- MENU ROUTING ---
+        switch (choice) {
+            case 1:
+                std::cout << "Enter the name of the input file (e.g., dataset4.csv): ";
+                std::cin >> filename;
+                
+                // If the parser returns true, update our flag to unlock the other options
+                if (parseInputData(filename)) {
+                    dataLoaded = true;
+                    std::cout << "Data loaded successfully.\n";
+                } else {
+                    std::cout << "Failed to load data (file missing or invalid format).\n";
+                }
+                break;
+
+            case 2:
+                if (!dataLoaded) {
+                    std::cout << "Warning: Please load data first (Option 1).\n";
+                } else {
+                    std::cout << "\n--- Submissions ---\n";
+                    std::cout << "Total submissions loaded: " << submissionList.size() << "\n";
+                    // (Optional) You can loop through submissionList here to print them to the console
+                }
+                break;
+
+            case 3:
+                if (!dataLoaded) {
+                    std::cout << "Warning: Please load data first (Option 1).\n";
+                } else {
+                    std::cout << "\n--- Reviewers ---\n";
+                    std::cout << "Total reviewers loaded: " << reviewerList.size() << "\n";
+                    // (Optional) You can loop through reviewerList here to print them to the console
+                }
+                break;
+
+            case 4:
+                if (!dataLoaded) {
+                    std::cout << "Warning: Please load data first (Option 1).\n";
+                } else {
+                    std::cout << "\nRunning Max-Flow Assignment Algorithm...\n";
+                    // We pass nullptr because in Interactive Mode, the function 
+                    // handles opening and closing its own output file based on currentConfig
+                    generateAssignments(nullptr); 
+                }
+                break;
+
+            case 5:
+                if (!dataLoaded) {
+                    std::cout << "Warning: Please load data first (Option 1).\n";
+                } else {
+                    std::cout << "\nRunning Risk Analysis...\n";
+                    // We pass nullptr for the same reason as above
+                    runRiskAnalysis(nullptr);
+                }
+                break;
+
+            case 0:
+                std::cout << "Exiting the tool. Goodbye!\n";
+                break;
+
+            default:
+                std::cout << "Invalid choice. Please select an option between 0 and 5.\n";
+        }
     }
+}
+
+int main(int argc, char* argv[]) {
+    
+    // 1. Check for Batch Mode: ./prog -b input.csv output.csv
+    if (argc == 4 && std::string(argv[1]) == "-b") {
+        
+        runBatchMode(argv[2], argv[3]);
+        return 0; // Exit immediately after batch processing finishes
+    } 
+    
+    // 2. Default to Interactive Mode
+    // If the user runs anything else (like just ./prog), launch the menu
+    
+    runInteractiveMenu();
+    
     return 0;
 }
