@@ -15,7 +15,7 @@ void runBatchMode(const std::string& inputFile, const std::string& outputFile);
 bool parseInputData(const std::string& filename);
 void generateAssignments(std::ofstream* outFile = nullptr);
 void runRiskAnalysis(std::ofstream* outFile = nullptr);
-void runInteractiveMenu() ;
+void runInteractiveMenu();
 
 // --- Global Data ---
 std::vector<Submission> submissionList;
@@ -184,6 +184,11 @@ void runRiskAnalysis(std::ofstream* outFile) {
     int required = (int)submissionList.size() * currentConfig.minReviewsPerSubmission;
     std::vector<int> risky;
 
+    if (currentConfig.riskAnalysis == 0) {
+        std::cout << "Aviso: A Análise de Risco está desativada (RiskAnalysis = 0) no ficheiro de configuração.\n";
+        return; 
+    }
+
     for (const auto& rev : reviewerList) {
         Graph<std::string> g;
         // If removing this reviewer drops the flow below the requirement, they are risky
@@ -245,12 +250,17 @@ bool parseInputData(const std::string& filename) {
         if (section == "SUB" && tokens.size() >= 5) {
             Submission s;
             s.id = std::stoi(tokens[0]);
+            s.title = tokens[1];     
+            s.authors = tokens[2]; 
+            s.email = tokens[3];   
             s.primaryDomain = std::stoi(tokens[4]);
             s.secondaryDomain = (tokens.size() > 5 && !tokens[5].empty()) ? std::stoi(tokens[5]) : -1;
             submissionList.push_back(s);
         } else if (section == "REV" && tokens.size() >= 4) {
             Reviewer r;
             r.id = std::stoi(tokens[0]);
+            r.name = tokens[1];      
+            r.email = tokens[2]; 
             r.primaryExpertise = std::stoi(tokens[3]);
             r.secondaryExpertise = (tokens.size() > 4 && !tokens[4].empty()) ? std::stoi(tokens[4]) : -1;
             reviewerList.push_back(r);
