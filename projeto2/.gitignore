@@ -1,0 +1,14 @@
+# Ignorar executaveis
+alocador
+alocador.exe
+
+# Ignorar pastas de sistema do macOS
+.DS_Store
+__MACOSX/
+*/__MACOSX/
+.*
+!.gitignore
+
+# Ignorar Doxygen gerado
+html/
+latex/
