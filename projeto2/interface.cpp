@@ -156,24 +156,22 @@ bool parseRegisters(const std::string& filename) {
  * @note Time Complexity: O(W^2 * L), where W is the number of Webs and L is the average number of live lines per Web.
  */
 void buildInterferenceGraph() {
+
     for (const auto& web : websList) {
         interferenceGraph.addVertex(web.id);
     }
 
     for (size_t i = 0; i < websList.size(); ++i) {
         for (size_t j = i + 1; j < websList.size(); ++j) {
-            bool interfere = false;
+            int commonPoints = 0;
             
-            // Check for intersection
+            // Conta quantos pontos de programa são partilhados
             for (int line : websList[i].lines) {
                 if (websList[j].lines.find(line) != websList[j].lines.end()) {
-                    interfere = true;
-                    break;
+                    commonPoints++;
                 }
             }
-            
-            // Add a bidirectional edge if they interfere
-            if (interfere) {
+            if (commonPoints > 1) {
                 interferenceGraph.addBidirectionalEdge(websList[i].id, websList[j].id, 1.0);
             }
         }
@@ -355,6 +353,71 @@ bool colorGraphBasic(bool allowSpill = false) {
     return perfectColoring;
 }
 
+
+/**
+ * @brief Implementa a estratégia de otimização Web Splitting.
+ * @details Tenta colorir o grafo de interferência. Se a coloração falhar,
+ * o maior Web é dividido em dois Webs menores e o grafo é reconstruído.
+ * O processo repete-se até a alocação ser possível ou o limite de divisões ser atingido.
+ * 
+ * @param maxSplits Número máximo de divisões permitidas.
+ * @return true se a alocação for bem-sucedida após os splittings; false caso contrário.
+ * 
+ * @note Complexidade de Tempo: Aproximadamente O(S * (V² + E)), onde S é o número de splittings, V o número de Webs,
+ * e E o número de arestas de interferência.
+ */
+bool applyWebSpilling(int maxSpills) {
+    std::set<int> spilledIds;
+
+    for (int spillsDone = 0; spillsDone <= maxSpills; spillsDone++) {
+        for (auto& web : websList) {
+            web.assignedRegister = -1;
+        }
+
+        if (colorGraphBasic(false)) {
+            for (auto& web : websList) {
+                if (spilledIds.count(web.id)) {
+                    web.assignedRegister = -1;
+                }
+            }
+            return true;
+        }
+
+        if (spillsDone == maxSpills) break;
+
+        int bestCandidate = -1;
+        int maxDegree = -1;
+
+        for (const auto& web : websList) {
+            if (spilledIds.count(web.id)) continue;
+
+            auto v = interferenceGraph.findVertex(web.id);
+            if (v == nullptr) continue;
+
+            int degree = v->getAdj().size();
+
+            if (degree > maxDegree) {
+                maxDegree = degree;
+                bestCandidate = web.id;
+            }
+        }
+
+        if (bestCandidate == -1) break;
+
+        spilledIds.insert(bestCandidate);
+        interferenceGraph.removeVertex(bestCandidate);
+
+        std::cout << "[INFO] Spill aplicado ao Web id: "
+                  << bestCandidate << "\n";
+    }
+
+    for (auto& web : websList) {
+        web.assignedRegister = -1;
+    }
+
+    return false;
+}
+
 /**
  * @brief Implementação da T2.3: Splitting
  * @param maxSplits O valor K passado no ficheiro registers.txt
@@ -444,6 +507,9 @@ bool runGraphColoring() {
         // Retornamos sempre true no modo híbrido porque queremos que ele 
         // emita o output final com os R's distribuídos e os restantes com "M".
         return true; 
+    }
+    else if (currentConfig.algorithm == "spilling") {
+        return applyWebSpilling(currentConfig.algoParam);
     }
     else {
         std::cerr << "Erro: Algoritmo desconhecido ou nao suportado nesta versao (" << currentConfig.algorithm << ").\n";
