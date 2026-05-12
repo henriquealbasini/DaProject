@@ -80,11 +80,9 @@ public:
     bool isSelected() const;
     Vertex<T> * getOrig() const;
     Edge<T> *getReverse() const;
-    double getFlow() const;
 
     void setSelected(bool selected);
     void setReverse(Edge<T> *reverse);
-    void setFlow(double flow);
 protected:
     Vertex<T> * dest; // destination vertex
     double weight; // edge weight, can also be used for capacity
@@ -96,7 +94,6 @@ protected:
     Vertex<T> *orig;
     Edge<T> *reverse = nullptr;
 
-    double flow; // for flow-related problems
 };
 
 /********************** Graph  ****************************/
@@ -125,11 +122,7 @@ public:
     bool removeEdge(const T &source, const T &dest);
     bool addBidirectionalEdge(const T &sourc, const T &dest, double w);
 
-    //Funçoes novas projeto
-    bool findAugmentingPath(Vertex<T> *s, Vertex<T> *t);
-    double edmondsKarp(const T& source, const T& target);
-    std::vector<Edge<T>*> getUsedEdges();
-
+    /** @return O número total de vértices no grafo. */
     int getNumVertex() const;
     std::vector<Vertex<T> *> getVertexSet() const;
 
@@ -349,7 +342,7 @@ void Vertex<T>::deleteEdge(Edge<T> *edge) {
 /********************** Edge  ****************************/
 
 template <class T>
-Edge<T>::Edge(Vertex<T> *orig, Vertex<T> *dest, double w): orig(orig), dest(dest), weight(w), flow(0) {} //adicionei o fluxo (new)
+Edge<T>::Edge(Vertex<T> *orig, Vertex<T> *dest, double w): orig(orig), dest(dest), weight(w) {} //adicionei o fluxo (new)
 
 template <class T>
 Vertex<T> * Edge<T>::getDest() const {
@@ -376,10 +369,7 @@ bool Edge<T>::isSelected() const {
     return this->selected;
 }
 
-template <class T>
-double Edge<T>::getFlow() const {
-    return flow;
-}
+
 
 template <class T>
 void Edge<T>::setSelected(bool selected) {
@@ -391,24 +381,18 @@ void Edge<T>::setReverse(Edge<T> *reverse) {
     this->reverse = reverse;
 }
 
-template <class T>
-void Edge<T>::setFlow(double flow) {
-    this->flow = flow;
-}
+
 
 /********************** Graph  ****************************/
 
 
-//4 funçoes novas implementadas
-
 /**
- * @brief Adiciona uma aresta bidirecional no grafo para usar no algoritmo de fluxo.
- * @details Cria a aresta de ida com capacidade 'w' e a aresta residual (retorno) com capacidade 0.
- * Complexidade de Tempo: O(V) no pior caso para encontrar os vértices, mas O(1) para a insercão das arestas.
- * @param sourc Informação do nó de origem.
- * @param dest Informação do nó de destino.
- * @param w Capacidade máxima da aresta (peso).
- * @return true se os nós existirem e a aresta for adicionada com sucesso, false caso contrário.
+ * @brief Adiciona uma aresta bidirecional (nao direcionada) no grafo de interferencia.
+ * @details Cria duas arestas com o mesmo peso, uma em cada direcao, indicando que dois webs interferem mutuamente.
+ * @param sourc ID do primeiro Web.
+ * @param dest ID do segundo Web.
+ * @param w Peso da aresta (normalmente 1.0 para conflitos).
+ * @return true se os nos existirem e a aresta for adicionada com sucesso, false caso contrario.
  */
 template <class T>
 bool Graph<T>::addBidirectionalEdge(const T &sourc, const T &dest, double w) {
@@ -417,118 +401,11 @@ bool Graph<T>::addBidirectionalEdge(const T &sourc, const T &dest, double w) {
     if (v1 == nullptr || v2 == nullptr)
         return false;
 
-    auto e1 = v1->addEdge(v2, w); // Cano de ida (capacidade W)
-    auto e2 = v2->addEdge(v1, 0); // Cano de volta
+    v1->addEdge(v2, w); // Conflito de ida
+    v2->addEdge(v1, w); // Conflito de volta
 
-    e1->setReverse(e2);
-    e2->setReverse(e1);
     return true;
 }
-
-
-/**
- * @brief Encontra um caminho de aumento usando BFS.
- * @details Visita apenas as arestas onde a capacidade residual (peso - fluxo) é maior que 0.
- * Complexidade de Tempo: O(V + E), onde V é o número de vértices e E o número de arestas.
- * @param s Apontador para o nó fonte (source).
- * @param t Apontador para o nó destino (sink).
- * @return true se encontrar um caminho válido até ao destino, false caso contrário.
- */
-template <class T>
-bool Graph<T>::findAugmentingPath(Vertex<T> *s, Vertex<T> *t) {
-    for (auto v : vertexSet) {
-        v->setVisited(false);
-        v->setPath(nullptr);
-    }
-
-    s->setVisited(true);
-    std::queue<Vertex<T> *> q;
-    q.push(s);
-
-    while (!q.empty() && !t->isVisited()) {
-        auto v = q.front();
-        q.pop();
-
-        for (auto e : v->getAdj()) {
-            auto w = e->getDest();
-            double residual = e->getWeight() - e->getFlow();
-
-            if (!w->isVisited() && residual > 0) {
-                w->setVisited(true);
-                w->setPath(e);
-                q.push(w);
-            }
-        }
-    }
-    return t->isVisited();
-}
-
-
-/**
- * @brief Calcula o Fluxo Máximo do grafo usando o algoritmo de Edmonds-Karp.
- * @details Complexidade de Tempo: O(V * E^2), onde V é o número de vértices e E o número de arestas.
- * @param source Informação do nó fonte.
- * @param target Informação do nó destino.
- * @return O valor total do fluxo máximo.
- */
-template <class T>
-double Graph<T>::edmondsKarp(const T& source, const T& target) {
-    Vertex<T> *s = findVertex(source);
-    Vertex<T> *t = findVertex(target);
-    if (s == nullptr || t == nullptr) return 0;
-
-    for (auto v : vertexSet) {
-        for (auto e : v->getAdj()) {
-            e->setFlow(0);
-        }
-    }
-
-    double maxFlow = 0;
-
-    while (findAugmentingPath(s, t)) {
-        double bottleneck = INF;
-
-        auto v = t;
-        while (v != s) {
-            auto e = v->getPath();
-            double residual = e->getWeight() - e->getFlow();
-            if (residual < bottleneck) {
-                bottleneck = residual;
-            }
-            v = e->getOrig();
-        }
-
-        v = t;
-        while (v != s) {
-            auto e = v->getPath();
-            e->setFlow(e->getFlow() + bottleneck);
-            e->getReverse()->setFlow(e->getReverse()->getFlow() - bottleneck);
-            v = e->getOrig();
-        }
-
-        maxFlow += bottleneck;
-    }
-
-    return maxFlow;
-}
-
-template <class T>
-std::vector<Edge<T>*> Graph<T>::getUsedEdges() {
-    std::vector<Edge<T>*> res;
-
-    for (auto v : vertexSet) {
-        for (auto e : v->getAdj()) {
-            if (e->getFlow() > 0 && e->getWeight() > 0) {
-                res.push_back(e);
-            }
-        }
-    }
-    return res;
-}
-
-
-
-
 
 
 template <class T>
@@ -541,8 +418,10 @@ std::vector<Vertex<T> *> Graph<T>::getVertexSet() const {
     return vertexSet;
 }
 
-/*
- * Auxiliary function to find a vertex with a given content.
+/**
+ * @brief Encontra um vertice no grafo dado o seu conteudo.
+ * @param in Informacao (ID) a procurar.
+ * @return Apontador para o vertice encontrado ou nullptr se nao existir.
  */
 template <class T>
 Vertex<T> * Graph<T>::findVertex(const T &in) const {
@@ -552,8 +431,10 @@ Vertex<T> * Graph<T>::findVertex(const T &in) const {
     return nullptr;
 }
 
-/*
- * Finds the index of the vertex with a given content.
+/**
+ * @brief Encontra o indice de um vertice no vetor de vertices do grafo.
+ * @param in Informacao (ID) a procurar.
+ * @return O indice do vertice ou -1 se nao for encontrado.
  */
 template <class T>
 int Graph<T>::findVertexIdx(const T &in) const {
@@ -562,9 +443,10 @@ int Graph<T>::findVertexIdx(const T &in) const {
             return i;
     return -1;
 }
-/*
- *  Adds a vertex with a given content or info (in) to a graph (this).
- *  Returns true if successful, and false if a vertex with that content already exists.
+/**
+ * @brief Adiciona um vertice ao grafo.
+ * @param in Informacao (ID do Web) a ser guardada no vertice.
+ * @return true se o vertice foi adicionado com sucesso, false se ja existir um vertice com a mesma informacao.
  */
 template <class T>
 bool Graph<T>::addVertex(const T &in) {
@@ -574,10 +456,10 @@ bool Graph<T>::addVertex(const T &in) {
     return true;
 }
 
-/*
- *  Removes a vertex with a given content (in) from a graph (this), and
- *  all outgoing and incoming edges.
- *  Returns true if successful, and false if such vertex does not exist.
+/**
+ * @brief Remove um vertice do grafo e todas as suas arestas incidentes/divergentes.
+ * @param in Informacao (ID do Web) do vertice a remover.
+ * @return true se o vertice foi removido com sucesso, false caso nao exista.
  */
 template <class T>
 bool Graph<T>::removeVertex(const T &in) {
@@ -596,10 +478,12 @@ bool Graph<T>::removeVertex(const T &in) {
     return false;
 }
 
-/*
- * Adds an edge to a graph (this), given the contents of the source and
- * destination vertices and the edge weight (w).
- * Returns true if successful, and false if the source or destination vertex does not exist.
+/**
+ * @brief Adiciona uma aresta direcionada entre dois vertices.
+ * @param sourc Informacao do vertice de origem.
+ * @param dest Informacao do vertice de destino.
+ * @param w Peso da aresta (interferencia).
+ * @return true se a aresta foi adicionada com sucesso, false se um dos vertices nao existir.
  */
 template <class T>
 bool Graph<T>::addEdge(const T &sourc, const T &dest, double w) {
@@ -611,10 +495,11 @@ bool Graph<T>::addEdge(const T &sourc, const T &dest, double w) {
     return true;
 }
 
-/*
- * Removes an edge from a graph (this).
- * The edge is identified by the source (sourc) and destination (dest) contents.
- * Returns true if successful, and false if such edge does not exist.
+/**
+ * @brief Remove uma aresta do grafo dadas as informacoes de origem e destino.
+ * @param sourc Informacao do vertice de origem.
+ * @param dest Informacao do vertice de destino.
+ * @return true se a aresta foi removida com sucesso, false caso nao exista.
  */
 template <class T>
 bool Graph<T>::removeEdge(const T &sourc, const T &dest) {

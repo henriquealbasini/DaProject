@@ -171,7 +171,7 @@ void buildInterferenceGraph() {
                     commonPoints++;
                 }
             }
-            if (commonPoints > 1) {
+            if (commonPoints > 0) {
                 interferenceGraph.addBidirectionalEdge(websList[i].id, websList[j].id, 1.0);
             }
         }
