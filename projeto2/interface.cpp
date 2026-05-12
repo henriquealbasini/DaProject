@@ -6,6 +6,8 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <stack>
+#include <map>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -222,15 +224,231 @@ void generateOutput(const std::string& outputFile, bool success) {
 }
 
 /**
+ * @brief Limpa o grafo de interferência apagando todos os vértices e arestas.
+ */
+void clearInterferenceGraph() {
+    std::vector<int> nodesToErase;
+    for (auto v : interferenceGraph.getVertexSet()) {
+        nodesToErase.push_back(v->getInfo());
+    }
+    for (int id : nodesToErase) {
+        interferenceGraph.removeVertex(id);
+    }
+}
+
+/**
+ * @brief Executa o algoritmo base de coloração de grafos (Greedy Graph Coloring).
+ * * @param allowSpill Se 'true', permite descartar nós para a memória (Spilling) quando o algoritmo bloqueia. Se 'false', aborta imediatamente ao falhar.
+ * @return true se o grafo foi colorido com sucesso usando apenas os registradores disponíveis; false caso contrário.
+ * * @note Complexidade de Tempo: O(V^2 + E), onde V é o número de Webs e E o número de interferências (arestas).
+ */
+bool colorGraphBasic(bool allowSpill = false) {
+    int K = currentConfig.numRegisters;
+    if (K <= 0) return false;
+
+    std::stack<int> S;
+    std::map<int, bool> inGraph;
+    std::map<int, int> currentDegrees;
+
+    for (const auto& web : websList) {
+        inGraph[web.id] = true;
+        auto v = interferenceGraph.findVertex(web.id);
+        if (v != nullptr) {
+            currentDegrees[web.id] = v->getAdj().size();
+        } else {
+            currentDegrees[web.id] = 0;
+        }
+    }
+
+    int nodesRemaining = websList.size();
+    bool perfectColoring = true; 
+
+    while (nodesRemaining > 0) {
+        bool nodeRemoved = false;
+
+        for (const auto& web : websList) {
+            if (inGraph[web.id] && currentDegrees[web.id] < K) {
+                S.push(web.id);
+                inGraph[web.id] = false;
+                nodesRemaining--;
+                nodeRemoved = true;
+
+                auto v = interferenceGraph.findVertex(web.id);
+                if (v != nullptr) {
+                    for (auto edge : v->getAdj()) {
+                        int neighborId = edge->getDest()->getInfo(); // edge é um ponteiro
+                        if (inGraph[neighborId]) {
+                            currentDegrees[neighborId]--;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!nodeRemoved && nodesRemaining > 0) {
+            if (!allowSpill) {
+                return false; 
+            } else {
+                perfectColoring = false;
+                int maxDegreeNode = -1;
+                int maxDegree = -1;
+                
+                for (const auto& web : websList) {
+                    if (inGraph[web.id] && currentDegrees[web.id] > maxDegree) {
+                        maxDegree = currentDegrees[web.id];
+                        maxDegreeNode = web.id;
+                    }
+                }
+                
+                if (maxDegreeNode != -1) {
+                    inGraph[maxDegreeNode] = false; 
+                    nodesRemaining--;
+                    
+                    auto v = interferenceGraph.findVertex(maxDegreeNode);
+                    if (v != nullptr) {
+                        for (auto edge : v->getAdj()) {
+                            int neighborId = edge->getDest()->getInfo();
+                            if (inGraph[neighborId]) {
+                                currentDegrees[neighborId]--;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for (auto& web : websList) web.assignedRegister = -1; 
+
+    while (!S.empty()) {
+        int webId = S.top();
+        S.pop();
+
+        std::vector<bool> usedColors(K, false);
+        auto v = interferenceGraph.findVertex(webId);
+        
+        if (v != nullptr) {
+            for (auto edge : v->getAdj()) {
+                int neighborId = edge->getDest()->getInfo();
+                for (const auto& neighborWeb : websList) {
+                    if (neighborWeb.id == neighborId && neighborWeb.assignedRegister != -1) {
+                        usedColors[neighborWeb.assignedRegister] = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        for (int c = 0; c < K; c++) {
+            if (!usedColors[c]) {
+                for (auto& web : websList) {
+                    if (web.id == webId) {
+                        web.assignedRegister = c;
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    return perfectColoring;
+}
+
+/**
+ * @brief Implementação da T2.3: Splitting
+ * @param maxSplits O valor K passado no ficheiro registers.txt
+ */
+bool applyWebSplitting(int maxSplits) {
+    int splitsDone = 0;
+    
+    while (splitsDone <= maxSplits) {
+        if (colorGraphBasic(false)) return true; 
+        
+        if (splitsDone == maxSplits) break; 
+        
+        int targetIndex = -1;
+        size_t maxLines = 1; 
+        
+        for (size_t i = 0; i < websList.size(); i++) {
+            if (websList[i].lines.size() > maxLines) {
+                maxLines = websList[i].lines.size();
+                targetIndex = i;
+            }
+        }
+        
+        if (targetIndex == -1) return false; 
+        
+        Web original = websList[targetIndex];
+        websList.erase(websList.begin() + targetIndex);
+        
+        auto it = original.lines.begin();
+        std::advance(it, original.lines.size() / 2);
+        
+        Web part1, part2;
+        int newIdBase = 0;
+        for (const auto& w : websList) {
+            if (w.id >= newIdBase) newIdBase = w.id + 1;
+        }
+        
+        part1.id = newIdBase;
+        part1.variableName = original.variableName;
+        part1.lines.insert(original.lines.begin(), it);
+        
+        part2.id = newIdBase + 1;
+        part2.variableName = original.variableName;
+        part2.lines.insert(it, original.lines.end());
+        
+        websList.push_back(part1);
+        websList.push_back(part2);
+        
+        // Uso da função segura para não corromper memória!
+        clearInterferenceGraph(); 
+        buildInterferenceGraph();
+        
+        splitsDone++;
+        std::cout << "[INFO] Aplicado Splitting ao Web original id: " << original.id << " (Var: " << original.variableName << ")\n";
+    }
+    
+    return false;
+}
+
+/**
  * @brief Main function where the coloring algorithms will be executed (Task 2).
  * @return True if allocation succeeds, false otherwise.
  */
 bool runGraphColoring() {
     std::cout << "[INFO] Running algorithm: " << currentConfig.algorithm << "...\n";
     
-    // TODO: Implement Graph Coloring logic here from graph.h
-    
-    return true; 
+    if (currentConfig.numRegisters <= 0) return false;
+
+    if (currentConfig.algorithm == "basic") {
+        return colorGraphBasic(false);
+    } 
+    else if (currentConfig.algorithm == "splitting") {
+        return applyWebSplitting(currentConfig.algoParam);
+    }
+    else if (currentConfig.algorithm == "free") {
+        // T2.4 HÍBRIDO: Combina Splitting com Spilling Dinâmico
+        // 1. Tenta dividir no máximo 3 webs para ver se safa o problema elegantemente
+        bool success = applyWebSplitting(3);
+        if (success) {
+            std::cout << "[INFO] Algoritmo Livre: Resolvido apenas com Splitting.\n";
+            return true;
+        }
+        
+        // 2. Se falhar, faz uma coloração que atira os casos mais difíceis (M) para a memória
+        std::cout << "[INFO] Algoritmo Livre: Splitting falhou. A utilizar modo Híbrido com Spilling Dinâmico...\n";
+        colorGraphBasic(true); // Retorna false se deitar algo fora, mas aloca o resto!
+        
+        // Retornamos sempre true no modo híbrido porque queremos que ele 
+        // emita o output final com os R's distribuídos e os restantes com "M".
+        return true; 
+    }
+    else {
+        std::cerr << "Erro: Algoritmo desconhecido ou nao suportado nesta versao (" << currentConfig.algorithm << ").\n";
+        return false;
+    }
 }
 
 /**
