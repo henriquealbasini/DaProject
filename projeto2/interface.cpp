@@ -480,42 +480,40 @@ bool applyWebSplitting(int maxSplits) {
  * @brief Main function where the coloring algorithms will be executed (Task 2).
  * @return True if allocation succeeds, false otherwise.
  */
+/**
+ * @brief Orquestrador Principal do Graph Coloring.
+ */
 bool runGraphColoring() {
     std::cout << "[INFO] Running algorithm: " << currentConfig.algorithm << "...\n";
     
-    if (currentConfig.numRegisters <= 0) return false;
+    bool success = false;
 
-    if (currentConfig.algorithm == "basic") {
-        return colorGraphBasic(false);
+    if (currentConfig.numRegisters <= 0) {
+        success = false;
+    }
+    else if (currentConfig.algorithm == "basic") {
+        success = colorGraphBasic(false);
     } 
     else if (currentConfig.algorithm == "splitting") {
-        return applyWebSplitting(currentConfig.algoParam);
+        success = applyWebSplitting(currentConfig.algoParam);
     }
     else if (currentConfig.algorithm == "free") {
-        // T2.4 HÍBRIDO: Combina Splitting com Spilling Dinâmico
-        // 1. Tenta dividir no máximo 3 webs para ver se safa o problema elegantemente
-        bool success = applyWebSplitting(3);
+        success = applyWebSplitting(3);
         if (success) {
             std::cout << "[INFO] Algoritmo Livre: Resolvido apenas com Splitting.\n";
-            return true;
+        } else {
+            std::cout << "[INFO] Algoritmo Livre: Splitting falhou. A utilizar modo Híbrido com Spilling...\n";
+            colorGraphBasic(true); 
+            success = true; 
         }
-        
-        // 2. Se falhar, faz uma coloração que atira os casos mais difíceis (M) para a memória
-        std::cout << "[INFO] Algoritmo Livre: Splitting falhou. A utilizar modo Híbrido com Spilling Dinâmico...\n";
-        colorGraphBasic(true); // Retorna false se deitar algo fora, mas aloca o resto!
-        
-        // Retornamos sempre true no modo híbrido porque queremos que ele 
-        // emita o output final com os R's distribuídos e os restantes com "M".
-        return true; 
-    }
-    else if (currentConfig.algorithm == "spilling") {
-        return applyWebSpilling(currentConfig.algoParam);
     }
     else {
-        std::cerr << "Erro: Algoritmo desconhecido ou nao suportado nesta versao (" << currentConfig.algorithm << ").\n";
+        std::cerr << "Erro: Algoritmo desconhecido (" << currentConfig.algorithm << ").\n";
         return false;
     }
+    return false;
 }
+
 
 /**
  * @brief Executes the program in non-interactive (silent) mode.

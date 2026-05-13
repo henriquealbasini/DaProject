@@ -342,7 +342,7 @@ void Vertex<T>::deleteEdge(Edge<T> *edge) {
 /********************** Edge  ****************************/
 
 template <class T>
-Edge<T>::Edge(Vertex<T> *orig, Vertex<T> *dest, double w): orig(orig), dest(dest), weight(w) {} //adicionei o fluxo (new)
+Edge<T>::Edge(Vertex<T> *orig, Vertex<T> *dest, double w): dest(dest), weight(w), orig(orig) {}
 
 template <class T>
 Vertex<T> * Edge<T>::getDest() const {
@@ -531,9 +531,13 @@ inline void deleteMatrix(double **m, int n) {
 
 template <class T>
 Graph<T>::~Graph() {
+    
     for (auto v : vertexSet) {
-        v->removeOutgoingEdges(); // apaga edges
-        delete v; // apaga vertex
+        v->removeOutgoingEdges(); 
+    }
+    
+    for (auto v : vertexSet) {
+        delete v; 
     }
 
     deleteMatrix(distMatrix, vertexSet.size());
