@@ -477,43 +477,158 @@ bool applyWebSplitting(int maxSplits) {
 }
 
 /**
+ * @brief Algoritmo Livre (T2.4) - Coloração Otimista (Heurística de Chaitin-Briggs).
+ * @details Em vez de deitar nós para a memória imediatamente quando o grau >= K, 
+ * empurra-os para a pilha na esperança de que uma cor fique livre durante a atribuição.
+ * @return true se conseguiu colorir todos os webs, false se teve de fazer spill a pelo menos um.
+ * @note Complexidade de Tempo: O(V^2 + E).
+ */
+bool colorGraphOptimistic() {
+    int K = currentConfig.numRegisters;
+    if (K <= 0) return false;
+
+    std::stack<int> S;
+    std::map<int, bool> inGraph;
+    std::map<int, int> currentDegrees;
+
+    for (const auto& web : websList) {
+        inGraph[web.id] = true;
+        auto v = interferenceGraph.findVertex(web.id);
+        if (v != nullptr) {
+            currentDegrees[web.id] = v->getAdj().size();
+        } else {
+            currentDegrees[web.id] = 0;
+        }
+    }
+
+    int nodesRemaining = websList.size();
+
+    while (nodesRemaining > 0) {
+        bool nodeRemoved = false;
+        int nodeToPush = -1;
+
+        for (const auto& web : websList) {
+            if (inGraph[web.id] && currentDegrees[web.id] < K) {
+                nodeToPush = web.id;
+                nodeRemoved = true;
+                break;
+            }
+        }
+        if (!nodeRemoved) {
+            int maxDegree = -1;
+            for (const auto& web : websList) {
+                if (inGraph[web.id] && currentDegrees[web.id] > maxDegree) {
+                    maxDegree = currentDegrees[web.id];
+                    nodeToPush = web.id;
+                }
+            }
+        }
+
+        if (nodeToPush != -1) {
+            S.push(nodeToPush);
+            inGraph[nodeToPush] = false;
+            nodesRemaining--;
+
+            auto v = interferenceGraph.findVertex(nodeToPush);
+            if (v != nullptr) {
+                for (auto edge : v->getAdj()) {
+                    int neighborId = edge->getDest()->getInfo();
+                    if (inGraph[neighborId]) {
+                        currentDegrees[neighborId]--;
+                    }
+                }
+            }
+        }
+    }
+
+    for (auto& web : websList) web.assignedRegister = -1;
+    bool perfectColoring = true; 
+
+    while (!S.empty()) {
+        int webId = S.top();
+        S.pop();
+
+        std::vector<bool> usedColors(K, false);
+        auto v = interferenceGraph.findVertex(webId);
+        
+        if (v != nullptr) {
+            for (auto edge : v->getAdj()) {
+                int neighborId = edge->getDest()->getInfo();
+                for (const auto& neighborWeb : websList) {
+                    if (neighborWeb.id == neighborId && neighborWeb.assignedRegister != -1) {
+                        usedColors[neighborWeb.assignedRegister] = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        bool colorFound = false;
+        for (int c = 0; c < K; c++) {
+            if (!usedColors[c]) {
+                for (auto& web : websList) {
+                    if (web.id == webId) {
+                        web.assignedRegister = c;
+                        colorFound = true;
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+
+        if (!colorFound) {
+            perfectColoring = false;
+            std::cout << "[INFO] Otimismo de Briggs falhou para Web ID " << webId << ". Atribuido a Memoria (M).\n";
+        }
+    }
+
+    return perfectColoring;
+}
+
+/**
  * @brief Main function where the coloring algorithms will be executed (Task 2).
  * @return True if allocation succeeds, false otherwise.
  */
 /**
  * @brief Orquestrador Principal do Graph Coloring.
  */
+/**
+ * @brief Main function where the coloring algorithms will be executed (Task 2).
+ * @return True if allocation succeeds, false otherwise.
+ */
 bool runGraphColoring() {
     std::cout << "[INFO] Running algorithm: " << currentConfig.algorithm << "...\n";
     
-    bool success = false;
+    if (currentConfig.numRegisters <= 0) return false;
 
-    if (currentConfig.numRegisters <= 0) {
-        success = false;
-    }
-    else if (currentConfig.algorithm == "basic") {
-        success = colorGraphBasic(false);
+    if (currentConfig.algorithm == "basic") {
+        return colorGraphBasic(false);
     } 
     else if (currentConfig.algorithm == "splitting") {
-        success = applyWebSplitting(currentConfig.algoParam);
+        return applyWebSplitting(currentConfig.algoParam);
     }
     else if (currentConfig.algorithm == "free") {
-        success = applyWebSplitting(3);
-        if (success) {
-            std::cout << "[INFO] Algoritmo Livre: Resolvido apenas com Splitting.\n";
-        } else {
-            std::cout << "[INFO] Algoritmo Livre: Splitting falhou. A utilizar modo Híbrido com Spilling...\n";
-            colorGraphBasic(true); 
-            success = true; 
+        if (applyWebSplitting(3)) {
+            std::cout << "[INFO] Algoritmo Livre: Resolvido perfeitamente apenas com Splitting.\n";
+            return true;
         }
+        
+        std::cout << "[INFO] Algoritmo Livre: Splitting nao foi suficiente. A invocar Coloracao Otimista de Briggs...\n";
+        colorGraphOptimistic(); 
+        
+        return true; 
+    }
+    else if (currentConfig.algorithm == "spilling") {
+        return applyWebSpilling(currentConfig.algoParam);
     }
     else {
-        std::cerr << "Erro: Algoritmo desconhecido (" << currentConfig.algorithm << ").\n";
+        std::cerr << "Erro: Algoritmo desconhecido ou nao suportado nesta versao (" << currentConfig.algorithm << ").\n";
         return false;
     }
+
     return false;
 }
-
 
 /**
  * @brief Executes the program in non-interactive (silent) mode.
